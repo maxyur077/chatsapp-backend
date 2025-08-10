@@ -4,7 +4,7 @@ dotenv.config();
 
 const config = {
   PORT: process.env.PORT || 3000,
-  MONGODB_URI: process.env.MONGODB_URI || "mongodb://localhost:27017/whatsapp",
+  MONGODB_URI: process.env.MONGODB_URI || "mongodb://localhost:27017/ChatsApp",
   NODE_ENV: process.env.NODE_ENV || "development",
   CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:3001",
   WEBHOOK_VERIFY_TOKEN: process.env.WEBHOOK_VERIFY_TOKEN || "verify_token",

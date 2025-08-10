@@ -2,33 +2,38 @@ const mongoose = require("mongoose");
 
 const messageSchema = new mongoose.Schema(
   {
-    wa_id: {
-      type: String,
-      required: true,
-      index: true,
-    },
     message_id: {
       type: String,
       required: true,
       unique: true,
     },
-    meta_msg_id: String,
+    wa_id: {
+      type: String,
+      required: true,
+      index: true,
+    },
     from: {
       type: String,
       required: true,
     },
-    to: String,
+    to: {
+      type: String,
+      required: true,
+    },
     type: {
       type: String,
-      enum: ["text"],
+      enum: ["text", "image", "audio", "video", "document"],
       default: "text",
     },
     content: {
       text: String,
+      media_url: String,
+      filename: String,
+      caption: String,
     },
     timestamp: {
       type: Date,
-      required: true,
+      default: Date.now,
       index: true,
     },
     status: {
@@ -42,24 +47,15 @@ const messageSchema = new mongoose.Schema(
       required: true,
     },
     contact_name: String,
-    conversation_id: String,
     sender_username: String,
-    metadata: {
-      phone_number_id: String,
-      display_phone_number: String,
-      gs_app_id: String,
-      entry_id: String,
-    },
   },
   {
     timestamps: true,
   }
 );
 
-// Indexes for performance
 messageSchema.index({ wa_id: 1, timestamp: -1 });
-messageSchema.index({ message_id: 1 });
-messageSchema.index({ meta_msg_id: 1 });
-messageSchema.index({ sender_username: 1 });
+messageSchema.index({ from: 1, timestamp: -1 });
+messageSchema.index({ "content.text": "text" });
 
-module.exports = mongoose.model("Message", messageSchema, "processed_messages");
+module.exports = mongoose.model("Message", messageSchema);

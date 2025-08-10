@@ -5,21 +5,19 @@ const {
   validateWebhook,
 } = require("../middleware/validation");
 const { webhookLimiter } = require("../middleware/rateLimiter");
+const auth = require("../middleware/auth");
 
 const router = express.Router();
 const conversationController = new ConversationController();
 
-router.get(
-  "/",
-  validateGetConversations,
-  conversationController.getConversations
+// Get all conversations
+router.get("/", auth, validateGetConversations, (req, res) =>
+  conversationController.getConversations(req, res)
 );
 
-router.post(
-  "/webhook",
-  webhookLimiter,
-  validateWebhook,
-  conversationController.processWebhook
+// Process webhook
+router.post("/webhook", webhookLimiter, validateWebhook, (req, res) =>
+  conversationController.processWebhook(req, res)
 );
 
 module.exports = router;

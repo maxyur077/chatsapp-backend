@@ -1,193 +1,230 @@
-const MessageService = require("../services/messageService");
-const { logger } = require("../utils/logger");
+const Message = require("../models/Message");
+const { validationResult } = require("express-validator");
 
 class MessageController {
   constructor() {
-    this.messageService = new MessageService();
-
+    // Explicitly bind all methods to maintain 'this' context
     this.getMessages = this.getMessages.bind(this);
-    this.getMessagesByUsername = this.getMessagesByUsername.bind(this);
-    this.searchMessages = this.searchMessages.bind(this);
     this.sendMessage = this.sendMessage.bind(this);
-    this.sendTextMessage = this.sendTextMessage.bind(this);
-    this.sendMediaMessage = this.sendMediaMessage.bind(this);
+    this.searchMessages = this.searchMessages.bind(this);
     this.updateMessageStatus = this.updateMessageStatus.bind(this);
     this.deleteMessage = this.deleteMessage.bind(this);
   }
 
-  async getMessages(req, res, next) {
+  async sendMessage(req, res) {
     try {
-      const { wa_id } = req.params;
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 50;
-
-      const result = await this.messageService.getMessages(wa_id, page, limit);
-
-      res.json({
-        success: true,
-        data: result,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getMessagesByUsername(req, res, next) {
-    try {
-      const { username } = req.params;
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 50;
-
-      const result = await this.messageService.getMessagesByUsername(
-        username,
-        page,
-        limit
-      );
-
-      res.json({
-        success: true,
-        data: result,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async searchMessages(req, res, next) {
-    try {
-      const { wa_id } = req.params;
-      const { q: query } = req.query;
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 20;
-
-      if (!query || query.trim().length < 2) {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
-          message: "Search query must be at least 2 characters long",
+          message: "Validation failed",
+          errors: errors.array(),
         });
       }
 
-      const result = await this.messageService.searchMessages(
-        wa_id,
-        query,
-        page,
-        limit
-      );
+      const { from_username, to, message, contact_name } = req.body;
 
-      res.json({
-        success: true,
-        data: result,
+      const newMessage = new Message({
+        wa_id: to,
+        message_id: `msg_${Date.now()}_${Math.random()
+          .toString(36)
+          .substr(2, 9)}`,
+        from: from_username,
+        to: to,
+        type: "text",
+        content: { text: message },
+        timestamp: new Date(),
+        status: "sent",
+        direction: "outbound",
+        contact_name: contact_name || to,
+        sender_username: from_username,
       });
-    } catch (error) {
-      next(error);
-    }
-  }
 
-  async sendMessage(req, res, next) {
-    try {
-      const messageData = req.body;
-      const result = await this.messageService.sendMessage(messageData);
+      const savedMessage = await newMessage.save();
+
+      // FIX: Emit message to BOTH sender and recipient
+      const io = req.app.get("io");
+      if (io) {
+        const messageData = {
+          id: savedMessage._id.toString(),
+          from: from_username,
+          to: to,
+          content: message, // Send as string, not object
+          timestamp: savedMessage.timestamp,
+          status: "sent",
+          senderName: contact_name || from_username,
+        };
+
+        // Emit to recipient
+        io.to(to).emit("new-message", messageData);
+        console.log(`📨 Message sent to recipient: ${to}`);
+
+        // Also emit to sender for real-time update
+        io.to(from_username).emit("new-message", messageData);
+        console.log(`📨 Message sent to sender: ${from_username}`);
+      }
 
       res.status(201).json({
         success: true,
         message: "Message sent successfully",
-        data: result,
+        data: {
+          message_id: savedMessage.message_id,
+          from: savedMessage.from,
+          to: savedMessage.to,
+          content: message,
+          timestamp: savedMessage.timestamp,
+          status: savedMessage.status,
+        },
       });
     } catch (error) {
-      next(error);
+      console.error("Send message error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error while sending message",
+      });
     }
   }
 
-  async sendTextMessage(req, res, next) {
+  async getMessages(req, res) {
     try {
-      const { from_username, to, message, contact_name } = req.body;
-      const result = await this.messageService.sendText({
-        from_username,
-        to,
-        message,
-        contact_name,
-      });
-
-      res.status(201).json({
-        success: true,
-        message: "Text message sent successfully",
-        data: result,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async sendMediaMessage(req, res, next) {
-    try {
-      const { from_username, to, type, caption } = req.body;
-      const file = req.file;
-      console.log(file);
-
-      if (!file) {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
-          message: "Media file is required",
+          message: "Validation failed",
+          errors: errors.array(),
         });
       }
 
-      const result = await this.messageService.sendMedia({
-        from_username,
-        to,
-        type,
-        file,
-        caption,
-      });
+      const { wa_id } = req.params;
+      const { page = 1, limit = 50 } = req.query;
 
-      res.status(201).json({
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const messages = await Message.find({
+        $or: [{ from: wa_id }, { to: wa_id }],
+      })
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      // FIX: Process messages to return proper content format
+      const processedMessages = messages.reverse().map((msg) => ({
+        id: msg._id,
+        from: msg.from,
+        to: msg.to,
+        content: msg.content?.text || msg.content || "", // Extract text content
+        timestamp: msg.timestamp,
+        status: msg.status,
+        senderName: msg.contact_name || msg.from,
+      }));
+
+      res.status(200).json({
         success: true,
-        message: "Media message sent successfully",
         data: {
-          ...result.toObject(),
-
-          optimized_urls: {
-            thumbnail:
-              result.type === "video"
-                ? result.content.media_metadata.thumbnail_url
-                : result.content.media_url,
-            full_size: result.content.media_url,
+          messages: processedMessages,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(
+              (await Message.countDocuments({ wa_id })) / parseInt(limit)
+            ),
           },
         },
       });
     } catch (error) {
-      next(error);
+      console.error("Get messages error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error while fetching messages",
+      });
     }
   }
 
-  async updateMessageStatus(req, res, next) {
+  async searchMessages(req, res) {
+    try {
+      const { wa_id } = req.params;
+      const { q: query } = req.query;
+
+      if (!query) {
+        return res.status(400).json({
+          success: false,
+          message: "Search query is required",
+        });
+      }
+
+      const messages = await Message.find({
+        wa_id,
+        "content.text": { $regex: query, $options: "i" },
+      }).sort({ timestamp: -1 });
+
+      res.status(200).json({
+        success: true,
+        data: { messages, searchQuery: query },
+      });
+    } catch (error) {
+      console.error("Search messages error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error while searching messages",
+      });
+    }
+  }
+
+  async updateMessageStatus(req, res) {
     try {
       const { id } = req.params;
       const { status } = req.body;
 
-      const result = await this.messageService.updateMessageStatus(id, status);
+      const message = await Message.findByIdAndUpdate(
+        id,
+        { status },
+        { new: true }
+      );
 
-      res.json({
+      if (!message) {
+        return res.status(404).json({
+          success: false,
+          message: "Message not found",
+        });
+      }
+
+      res.status(200).json({
         success: true,
-        message: "Status updated successfully",
-        data: result,
+        message: "Message status updated",
+        data: message,
       });
     } catch (error) {
-      next(error);
+      console.error("Update message status error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error while updating message status",
+      });
     }
   }
 
-  async deleteMessage(req, res, next) {
+  async deleteMessage(req, res) {
     try {
       const { messageId } = req.params;
-      const result = await this.messageService.deleteMessage(messageId);
 
-      res.json({
+      const message = await Message.findByIdAndDelete(messageId);
+
+      if (!message) {
+        return res.status(404).json({
+          success: false,
+          message: "Message not found",
+        });
+      }
+
+      res.status(200).json({
         success: true,
         message: "Message deleted successfully",
-        data: result,
       });
     } catch (error) {
-      next(error);
+      console.error("Delete message error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error while deleting message",
+      });
     }
   }
 }

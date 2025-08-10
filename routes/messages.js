@@ -7,36 +7,34 @@ const {
   validateUpdateMessageStatus,
 } = require("../middleware/validation");
 const { messageLimiter } = require("../middleware/rateLimiter");
+const auth = require("../middleware/auth");
 
 const router = express.Router();
 const messageController = new MessageController();
 
-// GET /api/messages/:wa_id - Get messages for a specific user by phone
-router.get("/:wa_id", validateGetMessages, messageController.getMessages);
-
-// GET /api/messages/:wa_id/search - Search messages for a user
-router.get(
-  "/:wa_id/search",
-  validateSearchMessages,
-  messageController.searchMessages
+// Get messages for a specific conversation
+router.get("/:wa_id", auth, validateGetMessages, (req, res) =>
+  messageController.getMessages(req, res)
 );
 
-// POST /api/messages - Send a text message
-router.post(
-  "/",
-  messageLimiter,
-  validateSendMessage,
-  messageController.sendMessage
+// Search messages in a conversation
+router.get("/:wa_id/search", auth, validateSearchMessages, (req, res) =>
+  messageController.searchMessages(req, res)
 );
 
-// PUT /api/messages/:id/status - Update message status
-router.put(
-  "/:id/status",
-  validateUpdateMessageStatus,
-  messageController.updateMessageStatus
+// Send a new message
+router.post("/", auth, messageLimiter, validateSendMessage, (req, res) =>
+  messageController.sendMessage(req, res)
 );
 
-// DELETE /api/messages/:messageId - Delete a message
-router.delete("/:messageId", messageController.deleteMessage);
+// Update message status
+router.put("/:id/status", auth, validateUpdateMessageStatus, (req, res) =>
+  messageController.updateMessageStatus(req, res)
+);
+
+// Delete a message
+router.delete("/:messageId", auth, (req, res) =>
+  messageController.deleteMessage(req, res)
+);
 
 module.exports = router;

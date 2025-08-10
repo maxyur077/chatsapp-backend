@@ -1,112 +1,73 @@
-const { body, param, query, validationResult } = require("express-validator");
+const { body, param, query } = require("express-validator");
 
-const handleValidationErrors = (req, res, next) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({
-      success: false,
-      message: "Validation failed",
-      errors: errors.array(),
-    });
-  }
-  next();
-};
-
-const validateWebhook = [
-  body("metaData").exists().withMessage("metaData is required"),
-  body("metaData.entry").isArray().withMessage("entry must be an array"),
-  handleValidationErrors,
+// User validation functions
+const validateUserRegister = [
+  body("username")
+    .isLength({ min: 3, max: 20 })
+    .withMessage("Username must be between 3 and 20 characters"),
+  body("name").isLength({ min: 1, max: 50 }).withMessage("Name is required"),
+  body("email").isEmail().withMessage("Please enter a valid email address"),
+  body("phone")
+    .matches(/^\+?[1-9]\d{1,14}$/)
+    .withMessage("Please enter a valid phone number"),
+  body("password")
+    .isLength({ min: 6 })
+    .withMessage("Password must be at least 6 characters long"),
 ];
 
+const validateUserLogin = [
+  body("username").notEmpty().withMessage("Username or email is required"),
+  body("password").notEmpty().withMessage("Password is required"),
+];
+
+// Message validation functions
 const validateSendMessage = [
-  body("from_username")
-    .optional()
-    .isString()
-    .isLength({ min: 3 })
-    .withMessage("from_username must be at least 3 characters"),
-  body("to").isMobilePhone().withMessage("Valid phone number is required"),
-  body("message")
-    .isLength({ min: 1, max: 4096 })
-    .withMessage("Message must be 1-4096 characters"),
-  body("contact_name")
-    .optional()
-    .isString()
-    .isLength({ max: 100 })
-    .withMessage("Contact name too long"),
-  handleValidationErrors,
+  body("from_username").notEmpty().withMessage("from_username is required"),
+  body("to").notEmpty().withMessage("to is required"),
+  body("message").notEmpty().withMessage("message is required"),
 ];
 
 const validateGetMessages = [
-  param("wa_id").isMobilePhone().withMessage("Valid wa_id is required"),
-  query("page")
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage("Page must be a positive integer"),
-  query("limit")
-    .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage("Limit must be between 1 and 100"),
-  handleValidationErrors,
+  param("wa_id").notEmpty().withMessage("wa_id is required"),
 ];
 
 const validateSearchMessages = [
-  param("wa_id").isMobilePhone().withMessage("Valid wa_id is required"),
-  query("q")
-    .isLength({ min: 2, max: 100 })
-    .withMessage("Search query must be 2-100 characters"),
-  query("page")
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage("Page must be a positive integer"),
-  query("limit")
-    .optional()
-    .isInt({ min: 1, max: 50 })
-    .withMessage("Limit must be between 1 and 50"),
-  handleValidationErrors,
+  param("wa_id").notEmpty().withMessage("wa_id is required"),
+  query("q").notEmpty().withMessage("search query is required"),
 ];
 
 const validateUpdateMessageStatus = [
-  param("id")
-    .isString()
-    .isLength({ min: 5 })
-    .withMessage("Valid message ID required"),
+  param("id").notEmpty().withMessage("message id is required"),
   body("status")
     .isIn(["sent", "delivered", "read", "failed"])
     .withMessage("Invalid status"),
-  handleValidationErrors,
 ];
 
+// Conversation validation functions (ADD THESE)
 const validateGetConversations = [
   query("page")
     .optional()
     .isInt({ min: 1 })
-    .withMessage("Page must be a positive integer"),
+    .withMessage("page must be a positive integer"),
   query("limit")
     .optional()
-    .isInt({ min: 1, max: 50 })
-    .withMessage("Limit must be between 1 and 50"),
-  handleValidationErrors,
+    .isInt({ min: 1, max: 100 })
+    .withMessage("limit must be between 1 and 100"),
 ];
 
-const validateUserRegister = [
-  body("username")
-    .isLength({ min: 3, max: 30 })
-    .withMessage("Username 3-30 chars")
-    .matches(/^[a-z0-9_]+$/)
-    .withMessage("Lowercase letters, numbers, underscores only"),
-  body("name").isLength({ min: 1, max: 80 }).withMessage("Name is required"),
-  body("email").isEmail().withMessage("Valid email required"),
-  body("phone").isMobilePhone().withMessage("Valid phone required"),
-  handleValidationErrors,
+const validateWebhook = [
+  body("type").notEmpty().withMessage("webhook type is required"),
+  body("data").notEmpty().withMessage("webhook data is required"),
 ];
 
+// Export ALL validation functions
 module.exports = {
-  validateWebhook,
+  validateUserRegister,
+  validateUserLogin,
   validateSendMessage,
   validateGetMessages,
   validateSearchMessages,
   validateUpdateMessageStatus,
-  validateGetConversations,
-  validateUserRegister,
-  handleValidationErrors,
+  validateGetConversations, // ADD THIS
+  validateWebhook, // ADD THIS
 };
