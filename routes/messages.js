@@ -15,22 +15,16 @@ const messageController = new MessageController();
 const verifyMessageAccess = async (req, res, next) => {
   try {
     const currentUser = req.user;
-    const targetUserId = req.params.wa_id;
+    const targetUsername = req.params.wa_id;
 
-    const participants = targetUserId.includes("_")
-      ? targetUserId.split("_")
-      : [targetUserId];
-
-    if (
-      !participants.includes(currentUser.username) &&
-      !participants.includes(currentUser.wa_id)
-    ) {
-      return res.status(403).json({
+    if (targetUsername === currentUser.username) {
+      return res.status(400).json({
         success: false,
-        message: "Unauthorized: You can only access your own conversations",
+        message: "Cannot access messages with yourself",
       });
     }
 
+    req.targetUsername = targetUsername;
     next();
   } catch (error) {
     return res.status(500).json({
@@ -61,6 +55,13 @@ router.post("/", auth, messageLimiter, validateSendMessage, (req, res) => {
     return res.status(403).json({
       success: false,
       message: "Unauthorized: Cannot send message as another user",
+    });
+  }
+
+  if (req.body.to === req.user.username) {
+    return res.status(400).json({
+      success: false,
+      message: "Cannot send message to yourself",
     });
   }
 
@@ -128,6 +129,26 @@ router.delete("/:messageId", auth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error deleting message",
+    });
+  }
+});
+
+router.get("/:wa_id/participants", auth, verifyMessageAccess, (req, res) => {
+  try {
+    const currentUser = req.user;
+    const targetUsername = req.params.wa_id;
+
+    res.json({
+      success: true,
+      data: {
+        participants: [currentUser.username, targetUsername],
+        conversationId: `${currentUser.username}_${targetUsername}`,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error getting conversation participants",
     });
   }
 });

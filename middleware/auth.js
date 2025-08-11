@@ -3,39 +3,38 @@ const User = require("../models/User");
 
 const auth = async (req, res, next) => {
   try {
-    // Get token from header
-    const token = req.header("Authorization")?.replace("Bearer ", "");
+    const token = req.headers.authorization?.split(" ")[1];
 
     if (!token) {
       return res.status(401).json({
         success: false,
-        message: "No token, authorization denied",
+        message: "Access denied. No token provided.",
       });
     }
 
-    // Verify token
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || "your-secret-key"
-    );
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Find user by id
     const user = await User.findById(decoded.id);
-
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Token is not valid",
+        message: "Token is valid but user no longer exists.",
       });
     }
 
-    req.user = decoded;
+    req.user = {
+      id: decoded.id,
+      username: decoded.username,
+      name: decoded.name,
+      email: decoded.email,
+    };
+
     next();
   } catch (error) {
     console.error("Auth middleware error:", error);
-    res.status(401).json({
+    return res.status(401).json({
       success: false,
-      message: "Token is not valid",
+      message: "Invalid token.",
     });
   }
 };
