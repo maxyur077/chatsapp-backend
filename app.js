@@ -3,6 +3,7 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const { createServer } = require("http");
 const { Server } = require("socket.io");
+const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
 const app = express();
@@ -41,6 +42,7 @@ let dbConnectionTime = null;
 
 const connectedUsers = new Map();
 const userSockets = new Map();
+const authenticatedSockets = new Map();
 
 mongoose.connection.on("connected", () => {
   isDbConnected = true;
@@ -55,8 +57,41 @@ mongoose.connection.on("disconnected", () => {
   isDbConnected = false;
 });
 
+io.use((socket, next) => {
+  try {
+    const token =
+      socket.handshake.auth.token ||
+      socket.handshake.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return next(new Error("Authentication required"));
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.user = decoded;
+    authenticatedSockets.set(socket.id, decoded);
+    next();
+  } catch (error) {
+    next(new Error("Invalid authentication token"));
+  }
+});
+
 io.on("connection", (socket) => {
+  const authenticatedUser = socket.user;
+
+  if (!authenticatedUser) {
+    socket.disconnect();
+    return;
+  }
+
   socket.on("join-user", (username) => {
+    if (username !== authenticatedUser.username) {
+      socket.emit("error", {
+        message: "Unauthorized: Cannot join another user's room",
+      });
+      return;
+    }
+
     socket.username = username;
     connectedUsers.set(username, socket.id);
     userSockets.set(socket.id, username);
@@ -79,8 +114,23 @@ io.on("connection", (socket) => {
     });
   });
 
+  // SECURE: Message sending with authorization
   socket.on("send-message", (messageData) => {
     const { to, from, message, messageId } = messageData;
+
+    // CRITICAL: Verify sender is authenticated user
+    if (from !== authenticatedUser.username) {
+      socket.emit("error", {
+        message: "Unauthorized: Cannot send message as another user",
+      });
+      return;
+    }
+
+    // Additional validation: Ensure user exists and is not sending to themselves
+    if (from === to) {
+      socket.emit("error", { message: "Cannot send message to yourself" });
+      return;
+    }
 
     const messageObject = {
       id: messageId || `msg-${Date.now()}-${Math.random()}`,
@@ -92,6 +142,7 @@ io.on("connection", (socket) => {
       senderName: from,
     };
 
+    // Send to recipient only if they're online
     const recipientSocketId = connectedUsers.get(to);
     if (recipientSocketId) {
       io.to(to).emit("newMessage", messageObject);
@@ -108,8 +159,13 @@ io.on("connection", (socket) => {
 
   socket.on("typing", (data) => {
     const { to, from, isTyping } = data;
-    const recipientSocketId = connectedUsers.get(to);
 
+    // Verify sender
+    if (from !== authenticatedUser.username) {
+      return;
+    }
+
+    const recipientSocketId = connectedUsers.get(to);
     if (recipientSocketId) {
       io.to(to).emit("user-typing", {
         from: from,
@@ -121,8 +177,13 @@ io.on("connection", (socket) => {
 
   socket.on("mark-as-read", (data) => {
     const { messageId, from, to } = data;
-    const senderSocketId = connectedUsers.get(from);
 
+    // Verify user authorization
+    if (to !== authenticatedUser.username) {
+      return;
+    }
+
+    const senderSocketId = connectedUsers.get(from);
     if (senderSocketId) {
       io.to(from).emit("message-read", {
         messageId: messageId,
@@ -137,6 +198,7 @@ io.on("connection", (socket) => {
     if (username) {
       connectedUsers.delete(username);
       userSockets.delete(socket.id);
+      authenticatedSockets.delete(socket.id);
 
       const onlineUsers = Array.from(connectedUsers.keys());
 
@@ -149,6 +211,7 @@ io.on("connection", (socket) => {
   });
 });
 
+// SECURE: Health endpoint with real online users
 app.get("/api/health", (req, res) => {
   const healthStatus = {
     success: true,
@@ -168,6 +231,7 @@ app.get("/api/health", (req, res) => {
       status: "active",
       connectedClients: io.engine.clientsCount,
       connectedUsers: connectedUsers.size,
+      authenticatedUsers: authenticatedSockets.size,
       onlineUsers: Array.from(connectedUsers.keys()),
     },
   };
@@ -176,6 +240,7 @@ app.get("/api/health", (req, res) => {
   res.status(statusCode).json(healthStatus);
 });
 
+// SECURE: Protected online users endpoint
 app.get("/api/users/online", (req, res) => {
   res.json({
     success: true,
